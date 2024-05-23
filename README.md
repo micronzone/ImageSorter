@@ -22,9 +22,9 @@ ImageSorter는 사용자가 지정한 디렉토리 경로에 있는 이미지 �
 
 2. (선택 사항) 가상 환경을 생성하고 활성화합니다:
     ```sh
-    python3 -m venv venv
-    source venv/bin/activate  # Linux 또는 macOS
-    .\venv\Scripts\activate   # Windows
+    python3 -m venv myenv
+    source myenv/bin/activate  # Linux 또는 macOS
+    .\myenv\Scripts\activate   # Windows
     ```
 
 ## 사용법
