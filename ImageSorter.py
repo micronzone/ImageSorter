@@ -1,88 +1,108 @@
 import os
 import shutil
 import argparse
-import logging
+from collections import defaultdict
 
-IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp"]
-
-def setup_logging(debug):
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, format='%(message)s')
-
-def scan_directory(directory, depth):
-    files_to_move = {}
-    for root, _, files in os.walk(directory):
-        current_depth = root[len(directory):].count(os.sep)
-        if depth is not None and current_depth > depth:
+def get_image_files(root_dir, depth, exclude_dirs, debug):
+    image_extensions = ["jpg", "jpeg", "gif", "png", "webp", "heic", "bmp"]
+    files = []
+    
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # Determine the depth of the current directory
+        current_depth = dirpath[len(root_dir):].count(os.sep) + 1
+        
+        # Skip directories at depths greater than specified
+        if current_depth > depth:
             continue
+        
+        # Skip specified exclude directories
+        if os.path.basename(dirpath).lower() in exclude_dirs:
+            dirnames[:] = []
+            continue
+        
+        for filename in filenames:
+            if any(filename.lower().endswith(ext) for ext in image_extensions):
+                files.append((dirpath, filename))
+                if debug:
+                    print(f"Found image file: {os.path.join(dirpath, filename)}")
+    return files
 
-        for file in files:
-            ext = file.lower().rsplit('.', 1)[-1]
-            if ext in IMAGE_EXTENSIONS:
-                src_path = os.path.join(root, file)
-                if ext not in files_to_move:
-                    files_to_move[ext] = []
-                files_to_move[ext].append(src_path)
-        if depth is None:  # If depth is not specified, only process the top-level directory
-            break
-    return files_to_move
-
-def display_move_plan(files_to_move):
-    for ext, files in files_to_move.items():
-        logging.info(f"\nFiles to move to '{ext}' directory:")
-        for file in files:
-            logging.info(f"  {file}")
-    logging.info("\nDo you want to proceed with the file move? (yes/no): ")
-    return input().strip().lower() == 'yes'
-
-def move_files(files_to_move, directory):
-    for ext, files in files_to_move.items():
-        ext_dir = os.path.join(directory, ext)
-        if not os.path.exists(ext_dir):
-            os.makedirs(ext_dir)
-            logging.debug(f"Created directory: {ext_dir}")
-
-        for file in files:
-            dest_path = os.path.join(ext_dir, os.path.basename(file))
-            shutil.move(file, dest_path)
-            logging.info(f"Moved {file} to {dest_path}")
+def organize_files(files, root_dir, dry_run, debug):
+    move_plan = defaultdict(list)
+    
+    for dirpath, filename in files:
+        ext = filename.split('.')[-1].lower()
+        target_dir = os.path.join(root_dir, ext)
+        
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+            if debug:
+                print(f"Created directory: {target_dir}")
+        
+        original_path = os.path.join(dirpath, filename)
+        target_path = os.path.join(target_dir, filename)
+        
+        counter = 1
+        while os.path.exists(target_path):
+            name, ext = os.path.splitext(filename)
+            target_path = os.path.join(target_dir, f"{name}({counter}){ext}")
+            counter += 1
+        
+        move_plan[original_path].append(target_path)
+        
+        if debug:
+            print(f"Planned move: {original_path} -> {target_path}")
+    
+    if dry_run:
+        print("\nPlanned operations:")
+        for src, targets in move_plan.items():
+            for target in targets:
+                print(f"Would move: {src} -> {target}")
+    else:
+        for src, targets in move_plan.items():
+            for target in targets:
+                shutil.move(src, target)
+                print(f"Moved: {src} -> {target}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Sort and move image files by extension.")
-    parser.add_argument('directory', type=str, help='Directory path to organize.')
-    parser.add_argument('-a', action='store_true', help='Sort and move all image files by extension.')
-    parser.add_argument('-t', type=str, help='Sort and move image files with the specified extension.')
-    parser.add_argument('-l', type=int, help='Depth of subdirectories to include.')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging.')
-
+    parser = argparse.ArgumentParser(description="Organize images by extension")
+    parser.add_argument("path", type=str, help="Directory path to organize")
+    parser.add_argument("-a", action="store_true", help="Organize all image files by extension")
+    parser.add_argument("-t", type=str, help="Organize only specified image extension (e.g., 'jpg')")
+    parser.add_argument("-l", type=int, default=1, help="Set directory depth (e.g., 2, 3, 4, ...)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    
     args = parser.parse_args()
-
-    setup_logging(args.debug)
-
-    if not os.path.isdir(args.directory):
-        logging.error(f"Directory does not exist: {args.directory}")
+    
+    if not os.path.isdir(args.path):
+        print("Error: Specified path is not a directory")
         return
-
+    
+    if args.debug:
+        print(f"Organizing images in directory: {args.path}")
+        print(f"Options -a: {args.a}, -t: {args.t}, -l: {args.l}, --debug: {args.debug}")
+    
+    exclude_dirs = ["jpg", "jpeg", "gif", "png", "webp", "heic", "bmp"]
+    
     if args.a:
-        files_to_move = scan_directory(args.directory, args.l)
+        files = get_image_files(args.path, args.l, exclude_dirs, args.debug)
     elif args.t:
-        if args.t not in IMAGE_EXTENSIONS:
-            logging.error(f"Unsupported image extension: {args.t}")
-            return
-        files_to_move = scan_directory(args.directory, args.l)
-        files_to_move = {args.t: files_to_move.get(args.t, [])}
+        files = get_image_files(args.path, args.l, exclude_dirs, args.debug)
+        files = [(dirpath, filename) for dirpath, filename in files if filename.lower().endswith(args.t.lower())]
     else:
-        logging.error("You must specify either the -a option or the -t option.")
+        print("Error: You must specify either -a or -t option")
         return
-
-    if not files_to_move:
-        logging.info("No files to move.")
-        return
-
-    if display_move_plan(files_to_move):
-        move_files(files_to_move, args.directory)
-        logging.info("File move completed.")
+    
+    if args.debug:
+        print(f"Found {len(files)} image files to organize.")
+    
+    organize_files(files, args.path, dry_run=True, debug=args.debug)
+    
+    confirmation = input("\nDo you want to proceed with these changes? (y/n): ")
+    if confirmation.lower() == 'y':
+        organize_files(files, args.path, dry_run=False, debug=args.debug)
     else:
-        logging.info("File move aborted.")
+        print("Operation cancelled.")
 
 if __name__ == "__main__":
     main()
